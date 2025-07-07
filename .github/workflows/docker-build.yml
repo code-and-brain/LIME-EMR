@@ -39,14 +39,56 @@ jobs:
       version: ${{ steps.build.outputs.version }}
       artifactid: ${{ steps.build.outputs.artifactid }}
     steps:
-      - name: Free disk space
+      - name: Free up disk space
         run: |
-          sudo rm -rf /opt/hostedtoolcache
-          sudo rm -rf /opt/az
-          sudo rm -rf /opt/google
-          sudo rm -rf /opt/microsoft
-          sudo rm -rf /opt/pipx
+          echo "=== Initial disk usage ==="
           df -h
+          echo ""
+          echo "=== Checking inodes ==="
+          df -i
+          echo ""
+          
+          echo "=== Checking specific problematic directories ==="
+          sudo du -sh /home/runner/actions-runner/cached/_diag/ 2>/dev/null || echo "Directory not found"
+          sudo du -sh /home/runner/actions-runner/cached/ 2>/dev/null || echo "Directory not found"
+          sudo du -sh /home/runner/work/_temp/ 2>/dev/null || echo "Directory not found"
+          echo ""
+          
+          echo "=== Cleaning GitHub Actions cache and logs ==="
+          sudo rm -rf /home/runner/actions-runner/cached/_diag/ || true
+          sudo rm -rf /home/runner/actions-runner/_diag/ || true
+          sudo rm -rf /home/runner/work/_temp/ || true
+          echo "GitHub Actions cache cleaned"
+          
+          echo "=== Cleaning Docker (if present) ==="
+          if command -v docker &> /dev/null; then
+              docker system prune -a -f || true
+              echo "Docker cleaned"
+          else
+              echo "Docker not found, skipping"
+          fi
+          
+          echo "=== Cleaning package caches ==="
+          sudo apt-get clean || true
+          sudo apt-get autoremove -y || true
+          echo "Package caches cleaned"
+          
+          echo "=== Cleaning other common large directories ==="
+          # Clean npm cache
+          npm cache clean --force 2>/dev/null || true
+          # Clean yarn cache
+          yarn cache clean 2>/dev/null || true
+          # Clean pip cache
+          pip cache purge 2>/dev/null || true
+          
+          echo "=== Removing large files (>100MB) ==="
+          sudo find /home/runner -size +100M -type f -exec ls -lh {} \; 2>/dev/null || true
+          
+          echo "=== Final disk usage ==="
+          df -h
+          echo ""
+          echo "=== Final inode usage ==="
+          df -i
     
       - name: Checkout code
         uses: actions/checkout@v4
