@@ -31,7 +31,7 @@ jobs:
       packages: write
     runs-on: ubuntu-latest
     container: 
-      image: ubuntu:22.04
+      image: ubuntu:24.04
       options: --user root
     strategy:
       matrix:
