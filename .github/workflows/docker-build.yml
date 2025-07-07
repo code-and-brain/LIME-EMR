@@ -39,56 +39,81 @@ jobs:
       version: ${{ steps.build.outputs.version }}
       artifactid: ${{ steps.build.outputs.artifactid }}
     steps:
-      - name: Free up disk space
+      - name: Aggressive disk space cleanup
         run: |
-          echo "=== Initial disk usage ==="
+          echo "=== Before cleanup ==="
           df -h
-          echo ""
-          echo "=== Checking inodes ==="
           df -i
           echo ""
           
-          echo "=== Checking specific problematic directories ==="
-          sudo du -sh /home/runner/actions-runner/cached/_diag/ 2>/dev/null || echo "Directory not found"
-          sudo du -sh /home/runner/actions-runner/cached/ 2>/dev/null || echo "Directory not found"
-          sudo du -sh /home/runner/work/_temp/ 2>/dev/null || echo "Directory not found"
-          echo ""
+          echo "=== Stopping services that might lock files ==="
+          sudo systemctl stop docker || true
+          sudo systemctl stop containerd || true
           
-          echo "=== Cleaning GitHub Actions cache and logs ==="
-          sudo rm -rf /home/runner/actions-runner/cached/_diag/ || true
-          sudo rm -rf /home/runner/actions-runner/_diag/ || true
-          sudo rm -rf /home/runner/work/_temp/ || true
-          echo "GitHub Actions cache cleaned"
+          echo "=== Removing large pre-installed tools ==="
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /opt/hostedtoolcache || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo rm -rf /usr/local/graalvm || true
+          sudo rm -rf /usr/local/share/chromium || true
+          sudo rm -rf /usr/local/lib/node_modules || true
           
-          echo "=== Cleaning Docker (if present) ==="
-          if command -v docker &> /dev/null; then
-              docker system prune -a -f || true
-              echo "Docker cleaned"
-          else
-              echo "Docker not found, skipping"
-          fi
-          
-          echo "=== Cleaning package caches ==="
+          echo "=== Cleaning package manager caches ==="
           sudo apt-get clean || true
           sudo apt-get autoremove -y || true
-          echo "Package caches cleaned"
+          sudo apt-get autoclean || true
           
-          echo "=== Cleaning other common large directories ==="
-          # Clean npm cache
-          npm cache clean --force 2>/dev/null || true
-          # Clean yarn cache
-          yarn cache clean 2>/dev/null || true
-          # Clean pip cache
-          pip cache purge 2>/dev/null || true
+          echo "=== Cleaning Docker completely ==="
+          if command -v docker &> /dev/null; then
+              docker system prune -a -f --volumes || true
+              sudo rm -rf /var/lib/docker || true
+              sudo rm -rf /var/lib/containerd || true
+          fi
           
-          echo "=== Removing large files (>100MB) ==="
-          sudo find /home/runner -size +100M -type f -exec ls -lh {} \; 2>/dev/null || true
+          echo "=== Cleaning GitHub Actions specific directories ==="
+          sudo rm -rf /home/runner/actions-runner/cached || true
+          sudo rm -rf /home/runner/actions-runner/_diag || true
+          sudo rm -rf /home/runner/work/_temp || true
+          sudo rm -rf /home/runner/.cache || true
+          sudo rm -rf /tmp/* || true
+          sudo rm -rf /var/tmp/* || true
           
-          echo "=== Final disk usage ==="
+          echo "=== Cleaning language-specific caches ==="
+          sudo rm -rf /home/runner/.npm || true
+          sudo rm -rf /home/runner/.yarn || true
+          sudo rm -rf /home/runner/.cache/pip || true
+          sudo rm -rf /home/runner/.gradle || true
+          sudo rm -rf /home/runner/.m2 || true
+          
+          echo "=== Cleaning logs ==="
+          sudo rm -rf /var/log/* || true
+          sudo rm -rf /home/runner/*.log || true
+          
+          echo "=== Force cleaning any remaining large files ==="
+          sudo find /home/runner -type f -size +50M -delete 2>/dev/null || true
+          sudo find /tmp -type f -size +50M -delete 2>/dev/null || true
+          sudo find /var -type f -size +50M -delete 2>/dev/null || true
+          
+          echo "=== Final filesystem sync ==="
+          sync
+          
+          echo "=== After cleanup ==="
           df -h
-          echo ""
-          echo "=== Final inode usage ==="
           df -i
+          
+          echo "=== Available space check ==="
+          AVAILABLE_GB=$(df / | tail -1 | awk '{print int($4/1024/1024)}')
+          echo "Available space: ${AVAILABLE_GB}GB"
+          
+          if [ $AVAILABLE_GB -lt 5 ]; then
+              echo "WARNING: Still low on space (${AVAILABLE_GB}GB available)"
+              echo "=== Finding largest directories ==="
+              sudo du -h --max-depth=2 /home/runner | sort -hr | head -20
+          else
+              echo "SUCCESS: ${AVAILABLE_GB}GB available"
+          fi
     
       - name: Checkout code
         uses: actions/checkout@v4
