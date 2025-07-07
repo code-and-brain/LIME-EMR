@@ -118,10 +118,6 @@ jobs:
             --activate-profiles validator \
             -Pbundled-docker \
             -Pazure \
-            -Dmaven.wagon.http.retryHandler.count=3 \
-            -Dmaven.wagon.httpconnectionManager.ttlSeconds=120 \
-            -Dmaven.compile.fork=false \
-            -Xmx2g \
             clean package
           
           # Verify and copy Mosul distro
