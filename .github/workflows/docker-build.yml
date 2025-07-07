@@ -30,6 +30,7 @@ jobs:
       contents: read
       packages: write
     runs-on: ubuntu-latest
+    container: ubuntu:22.04
     strategy:
       matrix:
         java: [ '8' ]
