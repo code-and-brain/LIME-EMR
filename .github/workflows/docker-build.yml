@@ -30,7 +30,7 @@ jobs:
       contents: read
       packages: write
     runs-on: ubuntu-latest
-    container: ubuntu:22.04
+    # container: ubuntu:22.04
     strategy:
       matrix:
         java: [ '8' ]
@@ -39,6 +39,15 @@ jobs:
       version: ${{ steps.build.outputs.version }}
       artifactid: ${{ steps.build.outputs.artifactid }}
     steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /opt/hostedtoolcache
+          sudo rm -rf /opt/az
+          sudo rm -rf /opt/google
+          sudo rm -rf /opt/microsoft
+          sudo rm -rf /opt/pipx
+          df -h
+    
       - name: Checkout code
         uses: actions/checkout@v4
         with:
