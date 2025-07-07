@@ -38,12 +38,23 @@ jobs:
       version: ${{ steps.build.outputs.version }}
       artifactid: ${{ steps.build.outputs.artifactid }}
     steps:
-      - name: Check disk usage
+      - name: Free up disk space
         run: |
+          # Remove large hostedtoolcache items
+          sudo rm -rf /opt/hostedtoolcache/Python
+          sudo rm -rf /opt/hostedtoolcache/node
+          sudo rm -rf /opt/hostedtoolcache/Ruby
+          sudo rm -rf /opt/hostedtoolcache/Java_Temurin-Hotspot
+          sudo rm -rf /opt/hostedtoolcache/go
+          
+          # Remove other large directories
+          sudo rm -rf /opt/az
+          sudo rm -rf /opt/google
+          sudo rm -rf /opt/microsoft
+          sudo rm -rf /opt/pipx
+          
+          # Check space after cleanup
           df -h
-          du -sh /tmp/* 2>/dev/null || true
-          du -sh /home/runner/* 2>/dev/null || true
-          du -sh /opt/* 2>/dev/null || true
         
       - name: Checkout code
         uses: actions/checkout@v4
