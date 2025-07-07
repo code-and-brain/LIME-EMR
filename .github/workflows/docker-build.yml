@@ -38,8 +38,12 @@ jobs:
       version: ${{ steps.build.outputs.version }}
       artifactid: ${{ steps.build.outputs.artifactid }}
     steps:
-      - name: Delete huge unnecessary tools folder
-        run: rm -rf /opt/hostedtoolcache
+      - name: Check disk usage
+        run: |
+          df -h
+          du -sh /tmp/* 2>/dev/null || true
+          du -sh /home/runner/* 2>/dev/null || true
+          du -sh /opt/* 2>/dev/null || true
         
       - name: Checkout code
         uses: actions/checkout@v4
