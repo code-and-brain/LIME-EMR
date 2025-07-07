@@ -119,20 +119,9 @@ jobs:
           echo "Current user: $(whoami)"
           echo "Home directory: $HOME"
           echo "Working directory: $(pwd)"
-          
-      - name: Test Maven repository access
-        run: |
-          echo "Testing Maven repository access..."
-          ./scripts/mvnw --batch-mode dependency:resolve-sources \
-            -DincludeGroupIds=org.openmrs.module \
-            -DincludeArtifactIds=datafilter-omod \
-            -Dverbose=true \
-            -X || echo "Repository access test completed (may show warnings)"
             
       - name: Build and Test
         id: build
-        env:
-          MAVEN_OPTS: "-Xmx2g -XX:MaxMetaspaceSize=512m"
         run: |          
           # Validate Maven wrapper
           if [ ! -x "./scripts/mvnw" ]; then
