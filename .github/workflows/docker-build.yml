@@ -58,9 +58,7 @@ jobs:
             
       - name: Build and Test
         id: build
-        run: |
-          set -euo pipefail
-          
+        run: |          
           # Validate Maven wrapper
           if [ ! -x "./scripts/mvnw" ]; then
             echo "::error::Maven wrapper not found or not executable"
