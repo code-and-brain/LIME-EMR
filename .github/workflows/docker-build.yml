@@ -40,124 +40,149 @@ jobs:
     steps:
       - name: System Cleanup - Prevent Inode Exhaustion
         run: |
-          echo "🔧 Starting system cleanup to prevent inode exhaustion..."
-          
-          # Display current disk and inode usage
-          echo "📊 Current disk usage:"
-          df -h
-          echo ""
-          echo "📊 Current inode usage:"
-          df -i
+          echo "🔍 COMPREHENSIVE SPACE ISSUE TROUBLESHOOTING"
+          echo "=============================================="
           echo ""
           
-          # Function to safely clean directory
-          cleanup_directory() {
-            local dir="$1"
-            local description="$2"
-            local max_files="${3:-1000}"
-            
-            if [ -d "$dir" ]; then
-              local file_count=$(find "$dir" -type f 2>/dev/null | wc -l)
-              echo "📁 $description: $file_count files"
+          # Check if this is a self-hosted runner
+          if [ -d "/home/runner/actions-runner" ] && [ ! -f "/.dockerenv" ]; then
+              echo "🏠 SELF-HOSTED RUNNER DETECTED"
+              echo "This explains why the GitHub Actions cleanup didn't help your persistent issue."
+              echo ""
+          else
+              echo "☁️  GitHub-hosted runner detected"
+              echo ""
+          fi
+          
+          # Function to check directory file counts
+          check_directory_files() {
+              local dir="$1"
+              local name="$2"
               
-              if [ "$file_count" -gt "$max_files" ]; then
-                echo "⚠️  Too many files in $dir ($file_count > $max_files), cleaning up..."
-                
-                # Remove files older than 7 days
-                find "$dir" -type f -mtime +7 -delete 2>/dev/null || true
-                
-                # If still too many files, remove older than 3 days
-                local remaining=$(find "$dir" -type f 2>/dev/null | wc -l)
-                if [ "$remaining" -gt "$max_files" ]; then
-                  echo "🧹 Still too many files, removing files older than 3 days..."
-                  find "$dir" -type f -mtime +3 -delete 2>/dev/null || true
-                fi
-                
-                # If still too many, remove all but the 500 newest files
-                local final_count=$(find "$dir" -type f 2>/dev/null | wc -l)
-                if [ "$final_count" -gt "$max_files" ]; then
-                  echo "🧹 Emergency cleanup: keeping only 500 newest files..."
-                  find "$dir" -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | tail -n +501 | cut -d' ' -f2- | xargs -r rm -f
-                fi
-                
-                local after_count=$(find "$dir" -type f 2>/dev/null | wc -l)
-                echo "✅ Cleanup complete: $file_count → $after_count files"
+              if [ -d "$dir" ]; then
+                  local file_count=$(find "$dir" -type f 2>/dev/null | wc -l)
+                  local dir_count=$(find "$dir" -type d 2>/dev/null | wc -l)
+                  local total_inodes=$((file_count + dir_count))
+                  
+                  echo "📁 $name:"
+                  echo "   Files: $file_count"
+                  echo "   Directories: $dir_count"
+                  echo "   Total inodes: $total_inodes"
+                  
+                  if [ $file_count -gt 10000 ]; then
+                      echo "   ⚠️  HIGH FILE COUNT - This could be your problem!"
+                      
+                      # Show file type breakdown
+                      echo "   📊 File types:"
+                      find "$dir" -type f -name "*.*" 2>/dev/null | sed 's/.*\.//' | sort | uniq -c | sort -nr | head -10 | sed 's/^/      /'
+                      
+                      # Show largest subdirectories by file count
+                      echo "   📊 Subdirectories with most files:"
+                      find "$dir" -type d -exec bash -c 'echo "$(find "$1" -maxdepth 1 -type f | wc -l) $1"' _ {} \; 2>/dev/null | sort -nr | head -10 | sed 's/^/      /'
+                  fi
+                  echo ""
               else
-                echo "✅ $description is healthy"
+                  echo "📁 $name: Not found"
+                  echo ""
               fi
-            else
-              echo "ℹ️  $description does not exist"
-            fi
-            echo ""
           }
           
-          # Clean up common problematic directories
-          cleanup_directory "/home/runner/actions-runner/cached/_diag" "GitHub Runner diagnostics" 500
-          cleanup_directory "/home/runner/actions-runner/cached/_work" "GitHub Runner work cache" 2000
-          cleanup_directory "/tmp" "Temporary files" 5000
-          cleanup_directory "/var/tmp" "Variable temporary files" 1000
-          cleanup_directory "/home/runner/.cache" "User cache" 3000
-          
-          # Clean up Docker if it exists
-          if command -v docker >/dev/null 2>&1; then
-            echo "🐳 Docker cleanup:"
-            docker system prune -f --volumes 2>/dev/null || true
-            docker image prune -a -f 2>/dev/null || true
-            echo "✅ Docker cleanup complete"
-            echo ""
-          fi
-          
-          # Clean up package manager caches
-          echo "📦 Package manager cleanup:"
-          sudo apt-get clean 2>/dev/null || true
-          sudo apt-get autoclean 2>/dev/null || true
-          sudo apt-get autoremove -y 2>/dev/null || true
-          echo "✅ Package cleanup complete"
-          echo ""
-          
-          # Remove old log files system-wide (be careful with this)
-          echo "📝 System log cleanup:"
-          sudo find /var/log -type f -name "*.log" -mtime +7 -delete 2>/dev/null || true
-          sudo find /var/log -type f -name "*.log.*" -mtime +7 -delete 2>/dev/null || true
-          echo "✅ System log cleanup complete"
-          echo ""
-          
-          # Clean up npm cache if Node.js is installed
-          if command -v npm >/dev/null 2>&1; then
-            echo "📦 NPM cache cleanup:"
-            npm cache clean --force 2>/dev/null || true
-            echo "✅ NPM cache cleanup complete"
-            echo ""
-          fi
-          
-          # Clean up pip cache if Python is installed
-          if command -v pip >/dev/null 2>&1; then
-            echo "🐍 Python pip cache cleanup:"
-            pip cache purge 2>/dev/null || true
-            echo "✅ Python cache cleanup complete"
-            echo ""
-          fi
-          
-          # Final status report
-          echo "🎯 Final system status:"
-          echo "📊 Disk usage after cleanup:"
+          # Check current status
+          echo "📊 CURRENT SYSTEM STATUS:"
+          echo "------------------------"
           df -h
           echo ""
-          echo "📊 Inode usage after cleanup:"
+          echo "📊 INODE USAGE:"
           df -i
           echo ""
           
-          # Check if we're still at risk
-          root_inode_usage=$(df -i | grep -E '/$' | awk '{print $5}' | sed 's/%//')
-          if [ "$root_inode_usage" -gt 80 ]; then
-            echo "⚠️  WARNING: Root inode usage is still high ($root_inode_usage%)"
-            echo "🔍 Top directories by file count:"
-            find / -xdev -type d -exec bash -c 'echo "$(find "$1" -maxdepth 1 | wc -l) $1"' _ {} \; 2>/dev/null | sort -nr | head -10
-          else
-            echo "✅ System is healthy - inode usage: $root_inode_usage%"
+          # Find the actual problem areas
+          echo "🔍 ANALYZING PROBLEM AREAS:"
+          echo "-------------------------"
+          
+          # Check GitHub Actions runner directories
+          check_directory_files "/home/runner/actions-runner" "GitHub Actions Runner"
+          check_directory_files "/home/runner/actions-runner/cached" "Runner Cache"
+          check_directory_files "/home/runner/actions-runner/cached/_diag" "Runner Diagnostics"
+          check_directory_files "/home/runner/actions-runner/cached/_work" "Runner Work"
+          check_directory_files "/home/runner/actions-runner/cached/_tools" "Runner Tools"
+          
+          # Check common problem directories
+          check_directory_files "/tmp" "Temporary Files"
+          check_directory_files "/var/tmp" "Variable Temp Files"
+          check_directory_files "/var/log" "System Logs"
+          check_directory_files "/home/runner/.cache" "User Cache"
+          check_directory_files "/home/runner/.npm" "NPM Cache"
+          check_directory_files "/home/runner/.pip" "Python Pip Cache"
+          
+          # Check for Docker if it exists
+          if command -v docker >/dev/null 2>&1; then
+              echo "🐳 DOCKER ANALYSIS:"
+              echo "Docker images:"
+              docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" 2>/dev/null || echo "Cannot access Docker"
+              echo ""
+              echo "Docker containers:"
+              docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Size}}" 2>/dev/null || echo "Cannot access Docker"
+              echo ""
           fi
           
-          echo "🎉 System cleanup completed successfully!"
+          # Find directories with the most files system-wide
+          echo "🔍 TOP DIRECTORIES BY FILE COUNT:"
+          echo "--------------------------------"
+          echo "This may take a moment..."
+          find / -xdev -type d -exec bash -c 'count=$(find "$1" -maxdepth 1 -type f 2>/dev/null | wc -l); if [ $count -gt 100 ]; then echo "$count $1"; fi' _ {} \; 2>/dev/null | sort -nr | head -20
+          
+          echo ""
+          echo "🔍 FINDING DIRECTORIES WITH EXCESSIVE SMALL FILES:"
+          echo "------------------------------------------------"
+          find / -xdev -type d -exec bash -c 'count=$(find "$1" -maxdepth 1 -type f -size -1k 2>/dev/null | wc -l); if [ $count -gt 500 ]; then echo "$count small files in $1"; fi' _ {} \; 2>/dev/null | sort -nr | head -10
+          
+          echo ""
+          echo "🔍 CHECKING FOR HIDDEN FILE PROLIFERATION:"
+          echo "----------------------------------------"
+          find /home/runner -name ".*" -type f 2>/dev/null | cut -d/ -f1-4 | sort | uniq -c | sort -nr | head -10
+          
+          echo ""
+          echo "💡 IMMEDIATE FIXES YOU CAN TRY:"
+          echo "==============================="
+          
+          # Get the most problematic directory
+          PROBLEM_DIR=$(find / -xdev -type d -exec bash -c 'count=$(find "$1" -maxdepth 1 -type f 2>/dev/null | wc -l); if [ $count -gt 1000 ]; then echo "$count $1"; fi' _ {} \; 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2)
+          
+          if [ -n "$PROBLEM_DIR" ]; then
+              echo "🎯 Most problematic directory appears to be: $PROBLEM_DIR"
+              echo ""
+              echo "To clean it up, you can run:"
+              echo "  # Remove files older than 7 days:"
+              echo "  find '$PROBLEM_DIR' -type f -mtime +7 -delete"
+              echo ""
+              echo "  # Or remove all files (BE CAREFUL!):"
+              echo "  rm -rf '$PROBLEM_DIR'/*"
+              echo ""
+          fi
+          
+          echo "🔧 GENERAL CLEANUP COMMANDS:"
+          echo "# Clean GitHub Actions runner cache:"
+          echo "sudo rm -rf /home/runner/actions-runner/cached/_work/*"
+          echo "sudo rm -rf /home/runner/actions-runner/cached/_diag/*"
+          echo ""
+          echo "# Clean temporary files:"
+          echo "sudo rm -rf /tmp/*"
+          echo "sudo rm -rf /var/tmp/*"
+          echo ""
+          echo "# Clean package caches:"
+          echo "sudo apt-get clean"
+          echo "sudo apt-get autoremove -y"
+          echo ""
+          echo "# Clean Docker (if applicable):"
+          echo "sudo docker system prune -a -f --volumes"
+          echo ""
+          
+          echo "⚠️  IMPORTANT NOTES:"
+          echo "- This script is read-only and won't modify anything"
+          echo "- Always backup important data before running cleanup commands"
+          echo "- If you're on a self-hosted runner, these issues will persist between jobs"
+          echo "- Consider setting up automated cleanup or log rotation"
 
       - name: Checkout code
         uses: actions/checkout@v4
