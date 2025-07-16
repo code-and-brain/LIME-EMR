@@ -38,6 +38,11 @@ jobs:
       version: ${{ steps.build.outputs.version }}
       artifactid: ${{ steps.build.outputs.artifactid }}
     steps:
+      - name: Clean cache
+        run: |
+          echo "=== Checking filesystem usage ==="
+          sudo rm -rf /home/runner/actions-runner/cached/
+    
       - name: Checkout code
         uses: actions/checkout@v4
         with:
