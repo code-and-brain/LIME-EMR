@@ -45,8 +45,8 @@ jobs:
 
       - name: Check filesystem usage and clean cache
         run: |
-          echo "=== Checking filesystem usage ==="
-          df -all -h
+          echo "=== Checking i node ==="
+          df -i
         
           
       - name: Set up JDK ${{ matrix.java }}
