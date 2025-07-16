@@ -38,16 +38,131 @@ jobs:
       version: ${{ steps.build.outputs.version }}
       artifactid: ${{ steps.build.outputs.artifactid }}
     steps:
+      - name: System Cleanup - Prevent Inode Exhaustion
+        run: |
+          echo "🔧 Starting system cleanup to prevent inode exhaustion..."
+          
+          # Display current disk and inode usage
+          echo "📊 Current disk usage:"
+          df -h
+          echo ""
+          echo "📊 Current inode usage:"
+          df -i
+          echo ""
+          
+          # Function to safely clean directory
+          cleanup_directory() {
+            local dir="$1"
+            local description="$2"
+            local max_files="${3:-1000}"
+            
+            if [ -d "$dir" ]; then
+              local file_count=$(find "$dir" -type f 2>/dev/null | wc -l)
+              echo "📁 $description: $file_count files"
+              
+              if [ "$file_count" -gt "$max_files" ]; then
+                echo "⚠️  Too many files in $dir ($file_count > $max_files), cleaning up..."
+                
+                # Remove files older than 7 days
+                find "$dir" -type f -mtime +7 -delete 2>/dev/null || true
+                
+                # If still too many files, remove older than 3 days
+                local remaining=$(find "$dir" -type f 2>/dev/null | wc -l)
+                if [ "$remaining" -gt "$max_files" ]; then
+                  echo "🧹 Still too many files, removing files older than 3 days..."
+                  find "$dir" -type f -mtime +3 -delete 2>/dev/null || true
+                fi
+                
+                # If still too many, remove all but the 500 newest files
+                local final_count=$(find "$dir" -type f 2>/dev/null | wc -l)
+                if [ "$final_count" -gt "$max_files" ]; then
+                  echo "🧹 Emergency cleanup: keeping only 500 newest files..."
+                  find "$dir" -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | tail -n +501 | cut -d' ' -f2- | xargs -r rm -f
+                fi
+                
+                local after_count=$(find "$dir" -type f 2>/dev/null | wc -l)
+                echo "✅ Cleanup complete: $file_count → $after_count files"
+              else
+                echo "✅ $description is healthy"
+              fi
+            else
+              echo "ℹ️  $description does not exist"
+            fi
+            echo ""
+          }
+          
+          # Clean up common problematic directories
+          cleanup_directory "/home/runner/actions-runner/cached/_diag" "GitHub Runner diagnostics" 500
+          cleanup_directory "/home/runner/actions-runner/cached/_work" "GitHub Runner work cache" 2000
+          cleanup_directory "/tmp" "Temporary files" 5000
+          cleanup_directory "/var/tmp" "Variable temporary files" 1000
+          cleanup_directory "/home/runner/.cache" "User cache" 3000
+          
+          # Clean up Docker if it exists
+          if command -v docker >/dev/null 2>&1; then
+            echo "🐳 Docker cleanup:"
+            docker system prune -f --volumes 2>/dev/null || true
+            docker image prune -a -f 2>/dev/null || true
+            echo "✅ Docker cleanup complete"
+            echo ""
+          fi
+          
+          # Clean up package manager caches
+          echo "📦 Package manager cleanup:"
+          sudo apt-get clean 2>/dev/null || true
+          sudo apt-get autoclean 2>/dev/null || true
+          sudo apt-get autoremove -y 2>/dev/null || true
+          echo "✅ Package cleanup complete"
+          echo ""
+          
+          # Remove old log files system-wide (be careful with this)
+          echo "📝 System log cleanup:"
+          sudo find /var/log -type f -name "*.log" -mtime +7 -delete 2>/dev/null || true
+          sudo find /var/log -type f -name "*.log.*" -mtime +7 -delete 2>/dev/null || true
+          echo "✅ System log cleanup complete"
+          echo ""
+          
+          # Clean up npm cache if Node.js is installed
+          if command -v npm >/dev/null 2>&1; then
+            echo "📦 NPM cache cleanup:"
+            npm cache clean --force 2>/dev/null || true
+            echo "✅ NPM cache cleanup complete"
+            echo ""
+          fi
+          
+          # Clean up pip cache if Python is installed
+          if command -v pip >/dev/null 2>&1; then
+            echo "🐍 Python pip cache cleanup:"
+            pip cache purge 2>/dev/null || true
+            echo "✅ Python cache cleanup complete"
+            echo ""
+          fi
+          
+          # Final status report
+          echo "🎯 Final system status:"
+          echo "📊 Disk usage after cleanup:"
+          df -h
+          echo ""
+          echo "📊 Inode usage after cleanup:"
+          df -i
+          echo ""
+          
+          # Check if we're still at risk
+          root_inode_usage=$(df -i | grep -E '/$' | awk '{print $5}' | sed 's/%//')
+          if [ "$root_inode_usage" -gt 80 ]; then
+            echo "⚠️  WARNING: Root inode usage is still high ($root_inode_usage%)"
+            echo "🔍 Top directories by file count:"
+            find / -xdev -type d -exec bash -c 'echo "$(find "$1" -maxdepth 1 | wc -l) $1"' _ {} \; 2>/dev/null | sort -nr | head -10
+          else
+            echo "✅ System is healthy - inode usage: $root_inode_usage%"
+          fi
+          
+          echo "🎉 System cleanup completed successfully!"
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Check filesystem usage and clean cache
-        run: |
-          echo "=== Checking i node ==="
-          df -i
-        
           
       - name: Set up JDK ${{ matrix.java }}
         uses: actions/setup-java@v4
