@@ -45,14 +45,6 @@ jobs:
 
       - name: Check filesystem usage and clean cache
         run: |
-          echo "=== Cleaning actions-runner cache ==="
-          if [ -d "/home/runner/actions-runner/cached/" ]; then
-            echo "Removing /home/runner/actions-runner/cached/ directory"
-            sudo rm -rf /home/runner/actions-runner/cached/
-            echo "Cache directory removed successfully"
-          else
-            echo "Cache directory /home/runner/actions-runner/cached/ does not exist"
-          fi
           echo "=== Checking filesystem usage ==="
           df -all -h
         
