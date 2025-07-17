@@ -38,152 +38,136 @@ jobs:
       version: ${{ steps.build.outputs.version }}
       artifactid: ${{ steps.build.outputs.artifactid }}
     steps:
-      - name: System Cleanup - Prevent Inode Exhaustion
+      - name: System Cleanup and Disk Management
         run: |
-          echo "🔍 COMPREHENSIVE SPACE ISSUE TROUBLESHOOTING"
-          echo "=============================================="
-          echo ""
-          
-          # Check if this is a self-hosted runner
-          if [ -d "/home/runner/actions-runner" ] && [ ! -f "/.dockerenv" ]; then
-              echo "🏠 SELF-HOSTED RUNNER DETECTED"
-              echo "This explains why the GitHub Actions cleanup didn't help your persistent issue."
-              echo ""
-          else
-              echo "☁️  GitHub-hosted runner detected"
-              echo ""
-          fi
-          
-          # Function to check directory file counts
-          check_directory_files() {
-              local dir="$1"
-              local name="$2"
-              
-              if [ -d "$dir" ]; then
-                  local file_count=$(find "$dir" -type f 2>/dev/null | wc -l)
-                  local dir_count=$(find "$dir" -type d 2>/dev/null | wc -l)
-                  local total_inodes=$((file_count + dir_count))
-                  
-                  echo "📁 $name:"
-                  echo "   Files: $file_count"
-                  echo "   Directories: $dir_count"
-                  echo "   Total inodes: $total_inodes"
-                  
-                  if [ $file_count -gt 10000 ]; then
-                      echo "   ⚠️  HIGH FILE COUNT - This could be your problem!"
-                      
-                      # Show file type breakdown
-                      echo "   📊 File types:"
-                      find "$dir" -type f -name "*.*" 2>/dev/null | sed 's/.*\.//' | sort | uniq -c | sort -nr | head -10 | sed 's/^/      /'
-                      
-                      # Show largest subdirectories by file count
-                      echo "   📊 Subdirectories with most files:"
-                      find "$dir" -type d -exec bash -c 'echo "$(find "$1" -maxdepth 1 -type f | wc -l) $1"' _ {} \; 2>/dev/null | sort -nr | head -10 | sed 's/^/      /'
-                  fi
-                  echo ""
-              else
-                  echo "📁 $name: Not found"
-                  echo ""
-              fi
-          }
-          
-          # Check current status
-          echo "📊 CURRENT SYSTEM STATUS:"
-          echo "------------------------"
+          echo "=== Initial Disk Space Check ==="
           df -h
           echo ""
-          echo "📊 INODE USAGE:"
+          
+          echo "=== Initial Inode Usage Check ==="
           df -i
           echo ""
           
-          # Find the actual problem areas
-          echo "🔍 ANALYZING PROBLEM AREAS:"
-          echo "-------------------------"
+          # Check inode usage and clean if necessary
+          echo "=== Checking Inode Usage ==="
+          INODE_USAGE=$(df -i / | tail -1 | awk '{print $5}' | sed 's/%//')
+          echo "Root filesystem inode usage: ${INODE_USAGE}%"
           
-          # Check GitHub Actions runner directories
-          check_directory_files "/home/runner/actions-runner" "GitHub Actions Runner"
-          check_directory_files "/home/runner/actions-runner/cached" "Runner Cache"
-          check_directory_files "/home/runner/actions-runner/cached/_diag" "Runner Diagnostics"
-          check_directory_files "/home/runner/actions-runner/cached/_work" "Runner Work"
-          check_directory_files "/home/runner/actions-runner/cached/_tools" "Runner Tools"
-          
-          # Check common problem directories
-          check_directory_files "/tmp" "Temporary Files"
-          check_directory_files "/var/tmp" "Variable Temp Files"
-          check_directory_files "/var/log" "System Logs"
-          check_directory_files "/home/runner/.cache" "User Cache"
-          check_directory_files "/home/runner/.npm" "NPM Cache"
-          check_directory_files "/home/runner/.pip" "Python Pip Cache"
-          
-          # Check for Docker if it exists
-          if command -v docker >/dev/null 2>&1; then
-              echo "🐳 DOCKER ANALYSIS:"
-              echo "Docker images:"
-              docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" 2>/dev/null || echo "Cannot access Docker"
-              echo ""
-              echo "Docker containers:"
-              docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Size}}" 2>/dev/null || echo "Cannot access Docker"
-              echo ""
+          if [ "$INODE_USAGE" -ge 90 ]; then
+            echo "High inode usage detected (${INODE_USAGE}%). Cleaning small files..."
+            
+            # Clean /tmp directory
+            echo "Cleaning /tmp directory..."
+            find /tmp -type f -delete 2>/dev/null || true
+            
+            # Clean Maven lastUpdated files
+            echo "Cleaning Maven lastUpdated files..."
+            find ~/.m2/repository -type f -name "lastUpdated" -delete 2>/dev/null || true
+            
+            echo "Small files cleanup completed"
+          else
+            echo "Inode usage is acceptable (${INODE_USAGE}%)"
           fi
           
-          # Find directories with the most files system-wide
-          echo "🔍 TOP DIRECTORIES BY FILE COUNT:"
-          echo "--------------------------------"
-          echo "This may take a moment..."
-          find / -xdev -type d -exec bash -c 'count=$(find "$1" -maxdepth 1 -type f 2>/dev/null | wc -l); if [ $count -gt 100 ]; then echo "$count $1"; fi' _ {} \; 2>/dev/null | sort -nr | head -20
-          
           echo ""
-          echo "🔍 FINDING DIRECTORIES WITH EXCESSIVE SMALL FILES:"
-          echo "------------------------------------------------"
-          find / -xdev -type d -exec bash -c 'count=$(find "$1" -maxdepth 1 -type f -size -1k 2>/dev/null | wc -l); if [ $count -gt 500 ]; then echo "$count small files in $1"; fi' _ {} \; 2>/dev/null | sort -nr | head -10
+          echo "=== Maven Cache Cleanup ==="
           
-          echo ""
-          echo "🔍 CHECKING FOR HIDDEN FILE PROLIFERATION:"
-          echo "----------------------------------------"
-          find /home/runner -name ".*" -type f 2>/dev/null | cut -d/ -f1-4 | sort | uniq -c | sort -nr | head -10
-          
-          echo ""
-          echo "💡 IMMEDIATE FIXES YOU CAN TRY:"
-          echo "==============================="
-          
-          # Get the most problematic directory
-          PROBLEM_DIR=$(find / -xdev -type d -exec bash -c 'count=$(find "$1" -maxdepth 1 -type f 2>/dev/null | wc -l); if [ $count -gt 1000 ]; then echo "$count $1"; fi' _ {} \; 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2)
-          
-          if [ -n "$PROBLEM_DIR" ]; then
-              echo "🎯 Most problematic directory appears to be: $PROBLEM_DIR"
-              echo ""
-              echo "To clean it up, you can run:"
-              echo "  # Remove files older than 7 days:"
-              echo "  find '$PROBLEM_DIR' -type f -mtime +7 -delete"
-              echo ""
-              echo "  # Or remove all files (BE CAREFUL!):"
-              echo "  rm -rf '$PROBLEM_DIR'/*"
-              echo ""
+          # Check if Maven cache exists and get size
+          if [ -d ~/.m2/repository ]; then
+            MAVEN_CACHE_SIZE=$(du -sh ~/.m2/repository 2>/dev/null | cut -f1)
+            echo "Maven cache size: $MAVEN_CACHE_SIZE"
+            
+            # Clean Maven cache
+            echo "Cleaning Maven cache..."
+            if command -v mvn &> /dev/null; then
+              mvn dependency:purge-local-repository -q || {
+                echo "Maven purge failed, removing cache manually..."
+                rm -rf ~/.m2/repository
+              }
+            else
+              echo "Maven not found, removing cache manually..."
+              rm -rf ~/.m2/repository
+            fi
+            
+            echo "Maven cache cleanup completed"
+          else
+            echo "Maven cache directory not found"
           fi
           
-          echo "🔧 GENERAL CLEANUP COMMANDS:"
-          echo "# Clean GitHub Actions runner cache:"
-          echo "sudo rm -rf /home/runner/actions-runner/cached/_work/*"
-          echo "sudo rm -rf /home/runner/actions-runner/cached/_diag/*"
           echo ""
-          echo "# Clean temporary files:"
-          echo "sudo rm -rf /tmp/*"
-          echo "sudo rm -rf /var/tmp/*"
+          echo "=== Checking /tmp Space ==="
+          TMP_USAGE=$(df -h /tmp 2>/dev/null | tail -1 | awk '{print $5}' | sed 's/%//' || echo "0")
+          echo "Tmp directory usage: ${TMP_USAGE}%"
+          
+          if [ "$TMP_USAGE" -ge 80 ]; then
+            echo "High /tmp usage detected. Setting alternative temp directory..."
+            
+            # Create alternative temp directory
+            mkdir -p /tmp/maven-tmp
+            export MAVEN_OPTS="-Djava.io.tmpdir=/tmp/maven-tmp"
+            echo "MAVEN_OPTS set to: $MAVEN_OPTS"
+            
+            # Make it available for subsequent steps
+            echo "MAVEN_OPTS=-Djava.io.tmpdir=/tmp/maven-tmp" >> $GITHUB_ENV
+          else
+            echo "Tmp directory usage is acceptable (${TMP_USAGE}%)"
+          fi
+          
           echo ""
-          echo "# Clean package caches:"
-          echo "sudo apt-get clean"
-          echo "sudo apt-get autoremove -y"
+          echo "=== Additional Cleanup ==="
+          
+          # Clean package manager caches
+          echo "Cleaning package manager caches..."
+          sudo apt-get clean 2>/dev/null || true
+          sudo apt-get autoclean 2>/dev/null || true
+          sudo apt-get autoremove -y 2>/dev/null || true
+          
+          # Clean Docker if available
+          if command -v docker &> /dev/null; then
+            echo "Cleaning Docker resources..."
+            docker system prune -af --volumes 2>/dev/null || true
+          fi
+          
+          # Clean npm cache if available
+          if command -v npm &> /dev/null; then
+            echo "Cleaning npm cache..."
+            npm cache clean --force 2>/dev/null || true
+          fi
+          
+          # Clean yarn cache if available
+          if command -v yarn &> /dev/null; then
+            echo "Cleaning yarn cache..."
+            yarn cache clean 2>/dev/null || true
+          fi
+          
           echo ""
-          echo "# Clean Docker (if applicable):"
-          echo "sudo docker system prune -a -f --volumes"
+          echo "=== Final Disk Space Check ==="
+          df -h
           echo ""
           
-          echo "⚠️  IMPORTANT NOTES:"
-          echo "- This script is read-only and won't modify anything"
-          echo "- Always backup important data before running cleanup commands"
-          echo "- If you're on a self-hosted runner, these issues will persist between jobs"
-          echo "- Consider setting up automated cleanup or log rotation"
-
+          echo "=== Final Inode Usage Check ==="
+          df -i
+          echo ""
+          
+          echo "=== Disk Quota Check ==="
+          quota -v 2>/dev/null || echo "Quota information not available or not configured"
+          
+          echo ""
+          echo "Cleanup completed successfully!"
+  
+      - name: Check Critical Disk Space
+        run: |
+          # Check if disk space is critically low after cleanup
+          ROOT_USAGE=$(df -h / | tail -1 | awk '{print $5}' | sed 's/%//')
+          
+          if [ "$ROOT_USAGE" -ge 95 ]; then
+            echo "::warning::Critical disk space usage: ${ROOT_USAGE}%"
+            echo "Consider manual intervention or workflow optimization"
+          elif [ "$ROOT_USAGE" -ge 85 ]; then
+            echo "::warning::High disk space usage: ${ROOT_USAGE}%"
+          else
+            echo "Disk space usage is acceptable: ${ROOT_USAGE}%"
+          fi
       - name: Checkout code
         uses: actions/checkout@v4
         with:
