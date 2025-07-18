@@ -55,7 +55,7 @@ jobs:
         with:
           servers: '[{"id": "msf-ocg-github-lime-emr", "username": "${{ secrets.MAVEN_GITHUB_ACTIONS_DEPLOY_USERNAME }}", "password": "${{ secrets.MAVEN_GITHUB_ACTIONS_DEPLOY_TOKEN }}"}]'
             
-      - name: Build and Test
+      - name: Build and Test (Phased Approach)
         id: build
         run: |
           set -euo pipefail
@@ -64,30 +64,19 @@ jobs:
           check_disk_space() {
             local step_name="$1"
             echo "=== Disk Space Check: $step_name ==="
-            df -h / /tmp
+            df -h /
             echo ""
-            
-            # Check if we're getting critically low on space
-            ROOT_AVAIL=$(df -h / | tail -1 | awk '{print $4}' | sed 's/[^0-9.]//g')
-            ROOT_UNIT=$(df -h / | tail -1 | awk '{print $4}' | sed 's/[0-9.]//g')
-            
-            echo "Available space: ${ROOT_AVAIL}${ROOT_UNIT}"
-            
-            # Convert to MB for comparison (rough conversion)
-            case "$ROOT_UNIT" in
-              "G"|"g") ROOT_AVAIL_MB=$(echo "$ROOT_AVAIL * 1024" | bc -l 2>/dev/null || echo "0") ;;
-              "M"|"m") ROOT_AVAIL_MB="$ROOT_AVAIL" ;;
-              "K"|"k") ROOT_AVAIL_MB=$(echo "$ROOT_AVAIL / 1024" | bc -l 2>/dev/null || echo "0") ;;
-              *) ROOT_AVAIL_MB="0" ;;
-            esac
-            
-            # Warning if less than 2GB available
-            if (( $(echo "$ROOT_AVAIL_MB < 2048" | bc -l 2>/dev/null || echo "0") )); then
-              echo "::warning::Low disk space detected: ${ROOT_AVAIL}${ROOT_UNIT} remaining"
-            fi
-            
-            echo "=============================="
-            echo ""
+          }
+          
+          # Aggressive cleanup function
+          aggressive_cleanup() {
+            echo "=== Performing Cleanup ==="
+            find . -name "target" -type d -not -path "./distro/target*" -exec rm -rf {} + 2>/dev/null || true
+            find ~/.m2/repository -name "*SNAPSHOT*" -type d -exec rm -rf {} + 2>/dev/null || true
+            find ~/.m2/repository -name "_remote.repositories" -delete 2>/dev/null || true
+            find ~/.m2/repository -name "*.lastUpdated" -delete 2>/dev/null || true
+            rm -rf /tmp/maven-* 2>/dev/null || true
+            echo "Cleanup completed"
           }
           
           # Validate Maven wrapper
@@ -96,10 +85,7 @@ jobs:
             exit 1
           fi
 
-          # Initial disk space check
-          check_disk_space "Before Maven Build"
-
-          # Get Mosul version and artifact ID
+          # Get project info
           echo "Fetching Mosul project info..."
           cd sites/mosul
           VERSION=$(./../../scripts/mvnw help:evaluate -Dexpression=project.version -q -DforceStdout)
@@ -108,39 +94,31 @@ jobs:
           
           echo "Mosul Artifact: $ARTIFACTID, Version: $VERSION"
           
-          # Check space before main build
-          check_disk_space "Before Main Maven Build"
-          
-          # Set Maven options for disk space optimization
-          export MAVEN_OPTS="-Xmx2g -Djava.io.tmpdir=/tmp/maven-build-tmp"
+          # Set Maven options for memory optimization
+          export MAVEN_OPTS="-Xmx1g -XX:MaxMetaspaceSize=512m -Djava.io.tmpdir=/tmp/maven-build-tmp"
           mkdir -p /tmp/maven-build-tmp
           
-          # Run build with disk monitoring
-          echo "Starting Maven build..."
-          (
-            # Run Maven build in background
-            ./scripts/mvnw --batch-mode --update-snapshots --activate-profiles validator -Pbundled-docker -Pazure clean package &
-            MAVEN_PID=$!
-            
-            # Monitor disk space every 30 seconds while Maven is running
-            while kill -0 $MAVEN_PID 2>/dev/null; do
-              sleep 30
-              check_disk_space "During Maven Build (PID: $MAVEN_PID)"
-            done
-            
-            # Wait for Maven to complete and get exit code
-            wait $MAVEN_PID
-            MAVEN_EXIT_CODE=$?
-            
-            if [ $MAVEN_EXIT_CODE -ne 0 ]; then
-              echo "::error::Maven build failed with exit code $MAVEN_EXIT_CODE"
-              check_disk_space "After Maven Build Failure"
-              exit $MAVEN_EXIT_CODE
-            fi
-          )
+          # Phase 1: Clean and validate
+          echo "Phase 1: Clean and validate"
+          check_disk_space "Before Phase 1"
+          ./scripts/mvnw --batch-mode clean validate
+          aggressive_cleanup
+          check_disk_space "After Phase 1"
           
-          # Check space after build
-          check_disk_space "After Maven Build"
+          # Phase 2: Compile and test
+          echo "Phase 2: Compile and test"
+          ./scripts/mvnw --batch-mode --update-snapshots compile test
+          aggressive_cleanup
+          check_disk_space "After Phase 2"
+          
+          # Phase 3: Package with profiles
+          echo "Phase 3: Package with profiles"
+          ./scripts/mvnw --batch-mode --activate-profiles validator -Pbundled-docker -Pazure package
+          check_disk_space "After Phase 3"
+          
+          # Final cleanup before copying artifacts
+          aggressive_cleanup
+          check_disk_space "After Final Cleanup"
           
           # Verify and copy Mosul distro
           MOSUL_DISTRO="sites/mosul/target/$ARTIFACTID-$VERSION/distro"
@@ -153,14 +131,7 @@ jobs:
           
           echo "Copying Mosul distro to $TARGET_DIR"
           mkdir -p "$TARGET_DIR"
-          
-          # Check space before copy
-          check_disk_space "Before Distro Copy"
-          
           cp -R "$MOSUL_DISTRO"/* "$TARGET_DIR"/
-          
-          # Check space after copy
-          check_disk_space "After Distro Copy"
           
           # Verify final build output
           if [ ! -d "distro/target/bundled-docker-build-tmp" ]; then
@@ -173,13 +144,10 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "artifactid=$ARTIFACTID" >> $GITHUB_OUTPUT
           
-          # Final disk space check
+          # Final cleanup
+          rm -rf /tmp/maven-build-tmp
           check_disk_space "Final Check"
           
-          # Clean up temp directory
-          rm -rf /tmp/maven-build-tmp
-          
-          echo "Build completed successfully!"
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
