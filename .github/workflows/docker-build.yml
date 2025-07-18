@@ -38,136 +38,6 @@ jobs:
       version: ${{ steps.build.outputs.version }}
       artifactid: ${{ steps.build.outputs.artifactid }}
     steps:
-      - name: System Cleanup and Disk Management
-        run: |
-          echo "=== Initial Disk Space Check ==="
-          df -h
-          echo ""
-          
-          echo "=== Initial Inode Usage Check ==="
-          df -i
-          echo ""
-          
-          # Check inode usage and clean if necessary
-          echo "=== Checking Inode Usage ==="
-          INODE_USAGE=$(df -i / | tail -1 | awk '{print $5}' | sed 's/%//')
-          echo "Root filesystem inode usage: ${INODE_USAGE}%"
-          
-          if [ "$INODE_USAGE" -ge 90 ]; then
-            echo "High inode usage detected (${INODE_USAGE}%). Cleaning small files..."
-            
-            # Clean /tmp directory
-            echo "Cleaning /tmp directory..."
-            find /tmp -type f -delete 2>/dev/null || true
-            
-            # Clean Maven lastUpdated files
-            echo "Cleaning Maven lastUpdated files..."
-            find ~/.m2/repository -type f -name "lastUpdated" -delete 2>/dev/null || true
-            
-            echo "Small files cleanup completed"
-          else
-            echo "Inode usage is acceptable (${INODE_USAGE}%)"
-          fi
-          
-          echo ""
-          echo "=== Maven Cache Cleanup ==="
-          
-          # Check if Maven cache exists and get size
-          if [ -d ~/.m2/repository ]; then
-            MAVEN_CACHE_SIZE=$(du -sh ~/.m2/repository 2>/dev/null | cut -f1)
-            echo "Maven cache size: $MAVEN_CACHE_SIZE"
-            
-            # Clean Maven cache
-            echo "Cleaning Maven cache..."
-            if command -v mvn &> /dev/null; then
-              mvn dependency:purge-local-repository -q || {
-                echo "Maven purge failed, removing cache manually..."
-                rm -rf ~/.m2/repository
-              }
-            else
-              echo "Maven not found, removing cache manually..."
-              rm -rf ~/.m2/repository
-            fi
-            
-            echo "Maven cache cleanup completed"
-          else
-            echo "Maven cache directory not found"
-          fi
-          
-          echo ""
-          echo "=== Checking /tmp Space ==="
-          TMP_USAGE=$(df -h /tmp 2>/dev/null | tail -1 | awk '{print $5}' | sed 's/%//' || echo "0")
-          echo "Tmp directory usage: ${TMP_USAGE}%"
-          
-          if [ "$TMP_USAGE" -ge 80 ]; then
-            echo "High /tmp usage detected. Setting alternative temp directory..."
-            
-            # Create alternative temp directory
-            mkdir -p /tmp/maven-tmp
-            export MAVEN_OPTS="-Djava.io.tmpdir=/tmp/maven-tmp"
-            echo "MAVEN_OPTS set to: $MAVEN_OPTS"
-            
-            # Make it available for subsequent steps
-            echo "MAVEN_OPTS=-Djava.io.tmpdir=/tmp/maven-tmp" >> $GITHUB_ENV
-          else
-            echo "Tmp directory usage is acceptable (${TMP_USAGE}%)"
-          fi
-          
-          echo ""
-          echo "=== Additional Cleanup ==="
-          
-          # Clean package manager caches
-          echo "Cleaning package manager caches..."
-          sudo apt-get clean 2>/dev/null || true
-          sudo apt-get autoclean 2>/dev/null || true
-          sudo apt-get autoremove -y 2>/dev/null || true
-          
-          # Clean Docker if available
-          if command -v docker &> /dev/null; then
-            echo "Cleaning Docker resources..."
-            docker system prune -af --volumes 2>/dev/null || true
-          fi
-          
-          # Clean npm cache if available
-          if command -v npm &> /dev/null; then
-            echo "Cleaning npm cache..."
-            npm cache clean --force 2>/dev/null || true
-          fi
-          
-          # Clean yarn cache if available
-          if command -v yarn &> /dev/null; then
-            echo "Cleaning yarn cache..."
-            yarn cache clean 2>/dev/null || true
-          fi
-          
-          echo ""
-          echo "=== Final Disk Space Check ==="
-          df -h
-          echo ""
-          
-          echo "=== Final Inode Usage Check ==="
-          df -i
-          echo ""
-          
-          echo "=== Disk Quota Check ==="
-          quota -v 2>/dev/null || echo "Quota information not available or not configured"
-          
-          echo ""
-          echo "Cleanup completed successfully!"
-  
-      - name: Check Critical Disk Space
-        run: |
-          # Check if disk space is critically low after cleanup
-          ROOT_USAGE=$(df -h / | tail -1 | awk '{print $5}' | sed 's/%//')
-          
-          if [ "$ROOT_USAGE" -ge 95 ]; then
-            echo "::warning::Critical disk space usage: ${ROOT_USAGE}%"
-            echo "Consider manual intervention or workflow optimization"
-          elif [ "$ROOT_USAGE" -ge 85 ]; then
-            echo "::warning::High disk space usage: ${ROOT_USAGE}%"
-          else
-            echo "Disk space usage is acceptable: ${ROOT_USAGE}%"
-          fi
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -190,11 +60,44 @@ jobs:
         run: |
           set -euo pipefail
           
+          # Function to check disk space and log it
+          check_disk_space() {
+            local step_name="$1"
+            echo "=== Disk Space Check: $step_name ==="
+            df -h / /tmp
+            echo ""
+            
+            # Check if we're getting critically low on space
+            ROOT_AVAIL=$(df -h / | tail -1 | awk '{print $4}' | sed 's/[^0-9.]//g')
+            ROOT_UNIT=$(df -h / | tail -1 | awk '{print $4}' | sed 's/[0-9.]//g')
+            
+            echo "Available space: ${ROOT_AVAIL}${ROOT_UNIT}"
+            
+            # Convert to MB for comparison (rough conversion)
+            case "$ROOT_UNIT" in
+              "G"|"g") ROOT_AVAIL_MB=$(echo "$ROOT_AVAIL * 1024" | bc -l 2>/dev/null || echo "0") ;;
+              "M"|"m") ROOT_AVAIL_MB="$ROOT_AVAIL" ;;
+              "K"|"k") ROOT_AVAIL_MB=$(echo "$ROOT_AVAIL / 1024" | bc -l 2>/dev/null || echo "0") ;;
+              *) ROOT_AVAIL_MB="0" ;;
+            esac
+            
+            # Warning if less than 2GB available
+            if (( $(echo "$ROOT_AVAIL_MB < 2048" | bc -l 2>/dev/null || echo "0") )); then
+              echo "::warning::Low disk space detected: ${ROOT_AVAIL}${ROOT_UNIT} remaining"
+            fi
+            
+            echo "=============================="
+            echo ""
+          }
+          
           # Validate Maven wrapper
           if [ ! -x "./scripts/mvnw" ]; then
             echo "::error::Maven wrapper not found or not executable"
             exit 1
           fi
+
+          # Initial disk space check
+          check_disk_space "Before Maven Build"
 
           # Get Mosul version and artifact ID
           echo "Fetching Mosul project info..."
@@ -205,8 +108,39 @@ jobs:
           
           echo "Mosul Artifact: $ARTIFACTID, Version: $VERSION"
           
-          # Run build
-          ./scripts/mvnw --batch-mode --update-snapshots --activate-profiles validator -Pbundled-docker -Pazure clean package
+          # Check space before main build
+          check_disk_space "Before Main Maven Build"
+          
+          # Set Maven options for disk space optimization
+          export MAVEN_OPTS="-Xmx2g -Djava.io.tmpdir=/tmp/maven-build-tmp"
+          mkdir -p /tmp/maven-build-tmp
+          
+          # Run build with disk monitoring
+          echo "Starting Maven build..."
+          (
+            # Run Maven build in background
+            ./scripts/mvnw --batch-mode --update-snapshots --activate-profiles validator -Pbundled-docker -Pazure clean package &
+            MAVEN_PID=$!
+            
+            # Monitor disk space every 30 seconds while Maven is running
+            while kill -0 $MAVEN_PID 2>/dev/null; do
+              sleep 30
+              check_disk_space "During Maven Build (PID: $MAVEN_PID)"
+            done
+            
+            # Wait for Maven to complete and get exit code
+            wait $MAVEN_PID
+            MAVEN_EXIT_CODE=$?
+            
+            if [ $MAVEN_EXIT_CODE -ne 0 ]; then
+              echo "::error::Maven build failed with exit code $MAVEN_EXIT_CODE"
+              check_disk_space "After Maven Build Failure"
+              exit $MAVEN_EXIT_CODE
+            fi
+          )
+          
+          # Check space after build
+          check_disk_space "After Maven Build"
           
           # Verify and copy Mosul distro
           MOSUL_DISTRO="sites/mosul/target/$ARTIFACTID-$VERSION/distro"
@@ -219,7 +153,14 @@ jobs:
           
           echo "Copying Mosul distro to $TARGET_DIR"
           mkdir -p "$TARGET_DIR"
+          
+          # Check space before copy
+          check_disk_space "Before Distro Copy"
+          
           cp -R "$MOSUL_DISTRO"/* "$TARGET_DIR"/
+          
+          # Check space after copy
+          check_disk_space "After Distro Copy"
           
           # Verify final build output
           if [ ! -d "distro/target/bundled-docker-build-tmp" ]; then
@@ -232,6 +173,13 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "artifactid=$ARTIFACTID" >> $GITHUB_OUTPUT
           
+          # Final disk space check
+          check_disk_space "Final Check"
+          
+          # Clean up temp directory
+          rm -rf /tmp/maven-build-tmp
+          
+          echo "Build completed successfully!"
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
