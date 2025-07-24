@@ -39,7 +39,6 @@ jobs:
       artifactid: ${{ steps.build.outputs.artifactid }}
     steps:
       - name: Free Disk Space (Ubuntu)
-        if: ${{ inputs.free-disk-space }}
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: false
