@@ -80,17 +80,6 @@ jobs:
             echo ""
           }
           
-          # Aggressive cleanup function
-          aggressive_cleanup() {
-            echo "=== Performing Cleanup ==="
-            find . -name "target" -type d -not -path "./distro/target*" -exec rm -rf {} + 2>/dev/null || true
-            find ~/.m2/repository -name "*SNAPSHOT*" -type d -exec rm -rf {} + 2>/dev/null || true
-            find ~/.m2/repository -name "_remote.repositories" -delete 2>/dev/null || true
-            find ~/.m2/repository -name "*.lastUpdated" -delete 2>/dev/null || true
-            rm -rf /tmp/maven-* 2>/dev/null || true
-            echo "Cleanup completed"
-          }
-          
           # Validate Maven wrapper
           if [ ! -x "./scripts/mvnw" ]; then
             echo "::error::Maven wrapper not found or not executable"
@@ -106,30 +95,14 @@ jobs:
           
           echo "Mosul Artifact: $ARTIFACTID, Version: $VERSION"
           
-          # Set Maven options for memory optimization
-          export MAVEN_OPTS="-Xmx1g -XX:MaxMetaspaceSize=512m -Djava.io.tmpdir=/tmp/maven-build-tmp"
-          mkdir -p /tmp/maven-build-tmp
-          
-          # Phase 1: Clean and validate
-          echo "Phase 1: Clean and validate"
-          check_disk_space "Before Phase 1"
-          ./scripts/mvnw --batch-mode clean validate
-          aggressive_cleanup
-          check_disk_space "After Phase 1"
-          
-          # Phase 2: Compile and test
-          echo "Phase 2: Compile and test"
-          ./scripts/mvnw --batch-mode --update-snapshots compile test
-          aggressive_cleanup
-          check_disk_space "After Phase 2"
+          check_disk_space "Phase 1"
           
           # Phase 3: Package with profiles
           echo "Phase 3: Package with profiles"
           ./scripts/mvnw --batch-mode --activate-profiles validator -Pbundled-docker -Pazure package
-          check_disk_space "After Phase 3"
+          check_disk_space "After Phase 1"
           
           # Final cleanup before copying artifacts
-          aggressive_cleanup
           check_disk_space "After Final Cleanup"
           
           # Verify and copy Mosul distro
@@ -157,7 +130,6 @@ jobs:
           echo "artifactid=$ARTIFACTID" >> $GITHUB_OUTPUT
           
           # Final cleanup
-          rm -rf /tmp/maven-build-tmp
           check_disk_space "Final Check"
           
       - name: Upload build artifacts
