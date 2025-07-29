@@ -75,6 +75,8 @@ jobs:
             echo "=== Disk Space Check: $step_name ==="
             df -h /
             echo ""
+            ls -al
+            echo ""
           }
           
           # Get project info
