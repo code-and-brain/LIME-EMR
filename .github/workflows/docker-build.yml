@@ -76,9 +76,7 @@ jobs:
             df -h /
             echo ""
           }
-
-          check_disk_space "Phase 1"
-
+          
           # Get project info
           echo "Fetching Mosul project info..."
           cd sites/mosul
@@ -88,12 +86,21 @@ jobs:
           
           echo "Mosul Artifact: $ARTIFACTID, Version: $VERSION"
           
-          check_disk_space "Phase 1"
+          # Phase 1: Clean and validate
+          echo "Phase 1: Clean and validate"
+          check_disk_space "Before Phase 1"
+          ./scripts/mvnw --batch-mode clean validate
+          check_disk_space "After Phase 1"
+          
+          # Phase 2: Compile and test
+          echo "Phase 2: Compile and test"
+          ./scripts/mvnw --batch-mode --update-snapshots compile test
+          check_disk_space "After Phase 2"
           
           # Phase 3: Package with profiles
           echo "Phase 3: Package with profiles"
           ./scripts/mvnw --batch-mode --activate-profiles validator -Pbundled-docker -Pazure package
-          check_disk_space "After Phase 1"
+          check_disk_space "After Phase 3"
           
           # Final cleanup before copying artifacts
           check_disk_space "After Final Cleanup"
@@ -123,6 +130,7 @@ jobs:
           echo "artifactid=$ARTIFACTID" >> $GITHUB_OUTPUT
           
           # Final cleanup
+          rm -rf /tmp/maven-build-tmp
           check_disk_space "Final Check"
           
       - name: Upload build artifacts
