@@ -85,25 +85,47 @@ jobs:
           cd ../..
           
           echo "Mosul Artifact: $ARTIFACTID, Version: $VERSION"
+
+          # Check space before main build
+          check_disk_space "Before Main Maven Build"
           
-          # Phase 1: Clean and validate
-          echo "Phase 1: Clean and validate"
-          check_disk_space "Before Phase 1"
-          ./scripts/mvnw --batch-mode clean validate
-          check_disk_space "After Phase 1"
+          # Run build with monitoring
+          echo "Starting Maven build with monitoring..."
+          (
+            # Run Maven build in background
+            ./scripts/mvnw --batch-mode --update-snapshots --activate-profiles validator -Pbundled-docker -Pazure clean package &
+            MAVEN_PID=$!
+            
+            # Monitor disk space every 60 seconds (less frequent)
+            while kill -0 $MAVEN_PID 2>/dev/null; do
+              sleep 60
+              check_disk_space "During Maven Build (PID: $MAVEN_PID)"
+              
+              # Get current available space
+              CURRENT_AVAIL=$(df -h / | tail -1 | awk '{print $4}' | sed 's/[^0-9.]//g')
+              CURRENT_UNIT=$(df -h / | tail -1 | awk '{print $4}' | sed 's/[0-9.]//g')
+              
+              # Only warn if space is very low, but don't interfere with build
+              if [[ "$CURRENT_UNIT" == "G" ]] && (( $(echo "$CURRENT_AVAIL < 3.0" | bc -l 2>/dev/null || echo "1") )); then
+                echo "::warning::Space critically low ($CURRENT_AVAIL$CURRENT_UNIT)! Build may fail soon."
+              elif [[ "$CURRENT_UNIT" == "M" ]]; then
+                echo "::error::Critical space shortage ($CURRENT_AVAIL$CURRENT_UNIT)! Build will likely fail."
+              fi
+            done
+            
+            # Wait for Maven to complete and get exit code
+            wait $MAVEN_PID
+            MAVEN_EXIT_CODE=$?
+            
+            if [ $MAVEN_EXIT_CODE -ne 0 ]; then
+              echo "::error::Maven build failed with exit code $MAVEN_EXIT_CODE"
+              check_disk_space "After Maven Build Failure"
+              exit $MAVEN_EXIT_CODE
+            fi
+          )
           
-          # Phase 2: Compile and test
-          echo "Phase 2: Compile and test"
-          ./scripts/mvnw --batch-mode --update-snapshots compile test
-          check_disk_space "After Phase 2"
-          
-          # Phase 3: Package with profiles
-          echo "Phase 3: Package with profiles"
-          ./scripts/mvnw --batch-mode --activate-profiles validator -Pbundled-docker -Pazure package
-          check_disk_space "After Phase 3"
-          
-          # Final cleanup before copying artifacts
-          check_disk_space "After Final Cleanup"
+          # Check space after build
+          check_disk_space "After Maven Build"
           
           # Verify and copy Mosul distro
           MOSUL_DISTRO="sites/mosul/target/$ARTIFACTID-$VERSION/distro"
