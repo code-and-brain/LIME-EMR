@@ -75,7 +75,12 @@ jobs:
             echo "=== Disk Space Check: $step_name ==="
             df -h /
             echo ""
-            ls -al
+            if [ -d "sites/mosul/target/ozone-msf-mosul-1.0.0-SNAPSHOT/run/docker" ]; then
+                echo "Directory exists, listing contents:"
+                ls -al sites/mosul/target/ozone-msf-mosul-1.0.0-SNAPSHOT/run/docker
+            else
+                echo "Directory does not exist"
+            fi
             echo ""
           }
           
