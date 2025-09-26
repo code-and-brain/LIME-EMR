@@ -22,7 +22,7 @@ The OpenMRS 3 distribution for MSF OCG
   </tr>
 </table>
 
-
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/MSF-OCG/LIME-EMR)
 
 
 ## A Generic Light Modular EMR using
